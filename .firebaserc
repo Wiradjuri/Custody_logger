@@ -1,0 +1,8 @@
+{
+  "projects": {
+    "default": "custodylogger",
+    "staging": "custodylogger"
+  },
+  "targets": {},
+  "etags": {}
+}

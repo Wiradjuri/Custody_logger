@@ -1,0 +1,24 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /entries/{entryId} {
+      allow read, write: if isOwner(request.auth.uid, resource.data.ownerId, request.resource.data.ownerId) && validEntry();
+    }
+
+    function isOwner(authUid, existingOwner, newOwner) {
+      return authUid != null && (existingOwner == authUid || newOwner == authUid);
+    }
+
+    function validEntry() {
+      return request.resource.data.keys().hasAll(
+        ['ownerId','eventDate','eventType','channel','counterpartName','summary','details']
+      ) &&
+      request.resource.data.ownerId is string &&
+      request.resource.data.eventType in ['Contact Attempt','Response','Visit','Cancellation','Emergency','Note'] &&
+      request.resource.data.channel in ['SMS','Phone Call','Email','Messaging App','In Person','Other'] &&
+      request.resource.data.counterpartName is string && request.resource.data.counterpartName.size() <= 120 &&
+      request.resource.data.summary is string && request.resource.data.summary.size() <= 160 &&
+      request.resource.data.details is string && request.resource.data.details.size() <= 4000;
+    }
+  }
+}

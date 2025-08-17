@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Custody Logbook</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Log custody/visitation contact attempts, responses, and events. Export a court-friendly PDF." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect rx='24' width='128' height='128' fill='%23121939'/%3E%3Cg transform='translate(18 20)'%3E%3Crect x='6' y='6' width='80' height='88' rx='10' fill='%233c78f0' opacity='.18' stroke='%236aa2ff'/%3E%3Cpath d='M8 26h76M8 42h76M8 58h56' stroke='%236aa2ff' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='78' cy='58' r='10' fill='%235dd39e'/%3E%3Cpath d='M72 74l8 8 14-14' stroke='%235dd39e' stroke-width='5' stroke-linecap='round' fill='none'/%3E%3C/g%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root{--bg:#0b1020;--bg-soft:#121939;--card:#1a214a;--muted:#9aa4c7;--text:#e6ecff;--accent:#6aa2ff;--danger:#ff6a8b;--ok:#5dd39e;--warning:#ffd166;--shadow:0 8px 30px rgba(0,0,0,.25)}
+    *{box-sizing:border-box} html,body,#app{height:100%}
+    body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;background:radial-gradient(1200px 600px at 20% -10%,#1d2b5a33,transparent),var(--bg);color:var(--text)}
+    .container{max-width:1120px;margin:0 auto;padding:24px}
+    .brand{display:flex;gap:12px;align-items:center}
+    .brand__logo{width:40px;height:40px}
+    .brand__title{font-weight:700;font-size:1.4rem}
+    .card{background:linear-gradient(180deg,rgba(26,33,74,.75),rgba(26,33,74,.9));backdrop-filter: blur(6px);border:1px solid rgba(255,255,255,.06);border-radius:16px;box-shadow:var(--shadow)}
+    .card__body{padding:20px}
+    .grid{display:grid;gap:16px}
+    .grid--2{grid-template-columns:1fr} @media(min-width:900px){.grid--2{grid-template-columns:1fr 1fr}}
+    input,select,textarea,button{width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:var(--bg-soft);color:var(--text);outline:none}
+    input::placeholder,textarea::placeholder{color:#cdd6ff60}
+    label{font-weight:600;font-size:.9rem;margin-bottom:6px;display:block}
+    button{cursor:pointer;font-weight:700;transition:transform .02s ease,filter .15s ease}
+    button:hover{filter:brightness(1.06)} button:active{transform:translateY(1px)}
+    .btn{display:inline-flex;gap:8px;align-items:center;justify-content:center}
+    .btn--primary{background:linear-gradient(180deg,#6aa2ff,#3c78f0);border:none}
+    .btn--danger{background:linear-gradient(180deg,#ff6a8b,#e44f74);border:none}
+    .btn--ghost{background:transparent;border:1px dashed rgba(255,255,255,.2)}
+    .btn--ok{background:linear-gradient(180deg,#5dd39e,#39b37f);border:none}
+    .row{display:flex;gap:12px;align-items:center}
+    .row--between{justify-content:space-between}
+    .muted{color:var(--muted)} .small{font-size:.85rem}
+    .badge{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);font-size:.75rem}
+    .table{width:100%;border-collapse:separate;border-spacing:0 8px}
+    .table th,.table td{padding:10px 12px;text-align:left}
+    .table thead th{font-size:.85rem;color:var(--muted)}
+    .table tbody tr{background:rgba(255,255,255,.04)}
+    .table tbody td:first-child{border-top-left-radius:10px;border-bottom-left-radius:10px}
+    .table tbody td:last-child{border-top-right-radius:10px;border-bottom-right-radius:10px}
+    hr{border:none;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.16),transparent);margin:16px 0}
+    .footer{margin-top:24px;color:#cdd6ff99}
+    .alert{border-left:4px solid var(--warning);background:rgba(255,209,102,.08);padding:12px 14px;border-radius:10px}
+  </style>
+
+  <!-- jsPDF + autoTable (for PDF export) -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+
+  <!-- Firebase (modular, via CDN) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, signOut } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
+    import { getFirestore, collection, addDoc, serverTimestamp, Timestamp, query, where, orderBy, onSnapshot, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+
+    // ─────────────────────────────────────────────────────────
+    // 1) CONFIG — replace with your Firebase web app config
+    //    (Firebase Console → Project settings → Your apps → Web app)
+    // ─────────────────────────────────────────────────────────
+    const firebaseConfig = {
+      apiKey: "AIzaSyDkD3CLiQAnuQdaDymIfHZZfL5kGqW5Xf8",
+      authDomain: "custodylogger.firebaseapp.com",
+      projectId: "custodylogger",
+      storageBucket: "custodylogger.appspot.com",
+      messagingSenderId: "245494641224",
+      appId: "1:245494641224:web:abcd1234efgh5678"
+    };
+
+    // Init
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    const $ = (sel, root=document) => root.querySelector(sel);
+
+    const root = document.createElement("div");
+    root.id = "app";
+    document.body.appendChild(root);
+
+    function escapeHtml(str){ const pre = document.createElement('pre'); pre.textContent = String(str ?? ""); return pre.innerHTML; }
+
+    // AUTH SCREEN
+    function renderAuth(){
+      root.innerHTML = `
+        <div class="container" style="max-width:760px">
+          <div class="brand" style="margin:24px 0;">
+            <img class="brand__logo" alt="logo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect rx='24' width='128' height='128' fill='%23121939'/%3E%3Cg transform='translate(18 20)'%3E%3Crect x='6' y='6' width='80' height='88' rx='10' fill='%233c78f0' opacity='.18' stroke='%236aa2ff'/%3E%3Cpath d='M8 26h76M8 42h76M8 58h56' stroke='%236aa2ff' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='78' cy='58' r='10' fill='%235dd39e'/%3E%3Cpath d='M72 74l8 8 14-14' stroke='%235dd39e' stroke-width='5' stroke-linecap='round' fill='none'/%3E%3C/g%3E%3C/svg%3E" />
+            <div>
+              <div class="brand__title">Custody Logbook</div>
+              <div class="small muted">Document contact attempts and visitation events</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card__body">
+              <div class="row row--between" style="margin-bottom:8px;">
+                <h2>Sign in</h2>
+                <span class="badge">Your data stays in your Firebase project</span>
+              </div>
+              <form id="login-form" class="grid" novalidate>
+                <div>
+                  <label for="email">Email</label>
+                  <input id="email" type="email" placeholder="you@example.com" required />
+                </div>
+                <div>
+                  <label for="password">Password</label>
+                  <input id="password" type="password" required />
+                </div>
+                <div class="row row--between" style="margin-top:8px;">
+                  <button class="btn btn--primary" type="submit">Sign in</button>
+                  <button id="btn-register" class="btn btn--ghost" type="button">Create account</button>
+                </div>
+              </form>
+              <div class="row" style="margin-top:12px;">
+                <button id="btn-reset" class="btn btn--ghost small" type="button">Forgot password</button>
+              </div>
+            </div>
+          </div>
+
+          <p class="small muted" style="margin-top:16px;">Store only factual, relevant information. Avoid defamatory statements.</p>
+        </div>
+      `;
+
+      $("#login-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const email = $("#email").value.trim();
+        const password = $("#password").value;
+        try { await signInWithEmailAndPassword(auth, email, password); }
+        catch(err){ console.error(err); alert("Sign in failed. Check email/password."); }
+      });
+
+      $("#btn-register").addEventListener("click", async () => {
+        const email = $("#email").value.trim();
+        const password = $("#password").value;
+        if(password.length < 8){ alert("Use a stronger password (min 8 chars)."); return; }
+        try { await createUserWithEmailAndPassword(auth, email, password); }
+        catch(err){ console.error(err); alert("Account creation failed (email already used?)."); }
+      });
+
+      $("#btn-reset").addEventListener("click", async () => {
+        const email = $("#email").value.trim();
+        if(!email){ alert("Enter your email first."); return; }
+        try { await sendPasswordResetEmail(auth, email); alert("Password reset email sent."); }
+        catch(err){ console.error(err); alert("Could not send reset email."); }
+      });
+    }
+
+    let unsub = null;
+    let currentEntries = [];
+
+    // APP SCREEN
+    function mountApp(){
+      const email = auth.currentUser?.email ?? "Account";
+      root.innerHTML = `
+        <div class="container">
+          <header class="row row--between">
+            <div class="brand">
+              <img class="brand__logo" alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect rx='24' width='128' height='128' fill='%23121939'/%3E%3Cg transform='translate(18 20)'%3E%3Crect x='6' y='6' width='80' height='88' rx='10' fill='%233c78f0' opacity='.18' stroke='%236aa2ff'/%3E%3Cpath d='M8 26h76M8 42h76M8 58h56' stroke='%236aa2ff' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='78' cy='58' r='10' fill='%235dd39e'/%3E%3Cpath d='M72 74l8 8 14-14' stroke='%235dd39e' stroke-width='5' stroke-linecap='round' fill='none'/%3E%3C/g%3E%3C/svg%3E" />
+              <div>
+                <div class="brand__title">Custody Logbook</div>
+                <div class="small muted">Private log of contact attempts & events</div>
+              </div>
+            </div>
+            <div class="row" role="group" aria-label="Account">
+              <span class="badge">${escapeHtml(email)}</span>
+              <button id="btn-logout" class="btn btn--ghost small" aria-label="Sign out">Sign out</button>
+            </div>
+          </header>
+
+          <main class="grid grid--2" style="margin-top:16px;">
+            <section class="card">
+              <div class="card__body">
+                <h2>New Entry</h2>
+                <p class="muted small">Record contact attempts, responses, visits, cancellations, emergencies, or notes.</p>
+                <hr />
+                <form id="entry-form" novalidate>
+                  <div class="grid">
+                    <div>
+                      <label for="eventDate">Event date & time</label>
+                      <input id="eventDate" type="datetime-local" required />
+                    </div>
+                    <div>
+                      <label for="eventType">Event type</label>
+                      <select id="eventType" required>
+                        <option>Contact Attempt</option>
+                        <option>Response</option>
+                        <option>Visit</option>
+                        <option>Cancellation</option>
+                        <option>Emergency</option>
+                        <option>Note</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label for="channel">Channel</label>
+                      <select id="channel" required>
+                        <option>SMS</option>
+                        <option>Phone Call</option>
+                        <option>Email</option>
+                        <option>Messaging App</option>
+                        <option>In Person</option>
+                        <option>Other</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label for="counterpartName">Other party / contact</label>
+                      <input id="counterpartName" type="text" placeholder="e.g., Alex (mother)" required />
+                    </div>
+                    <div>
+                      <label for="summary">Short summary</label>
+                      <input id="summary" type="text" maxlength="120" placeholder="e.g., Requested Saturday 10am pick-up" required />
+                    </div>
+                    <div>
+                      <label for="outcome">Outcome (optional)</label>
+                      <input id="outcome" type="text" placeholder="e.g., no response / confirmed / refused" />
+                    </div>
+                    <div>
+                      <label for="location">Location (optional)</label>
+                      <input id="location" type="text" placeholder="e.g., school / police station / home" />
+                    </div>
+                  </div>
+                  <div style="margin-top:12px;">
+                    <label for="details">Details</label>
+                    <textarea id="details" rows="5" placeholder="Keep factual: who, what, when, where. Avoid opinions."></textarea>
+                  </div>
+                  <div class="row row--between" style="margin-top:16px;">
+                    <button type="submit" class="btn btn--primary">Save Entry</button>
+                    <button type="reset" class="btn btn--ghost">Clear</button>
+                  </div>
+                </form>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="card__body">
+                <div class="row row--between">
+                  <h2>Your Log</h2>
+                  <div class="row">
+                    <button id="btn-export-pdf" class="btn btn--ok small">Export PDF</button>
+                  </div>
+                </div>
+                <hr />
+                <div class="alert small" style="margin-bottom:10px;">
+                  Tip: Courts prefer clear, chronological, factual records.
+                </div>
+                <table class="table" aria-label="Log entries">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Type</th>
+                      <th>Channel</th>
+                      <th>Counterpart</th>
+                      <th>Summary</th>
+                      <th>Outcome</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="entries-tbody"></tbody>
+                </table>
+              </div>
+            </section>
+          </main>
+
+          <footer class="container footer small">
+            <hr />
+            <div>Your data stays in your Firebase project. Protect your account & device.</div>
+          </footer>
+        </div>
+      `;
+
+      // Save entry
+      $("#entry-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const user = auth.currentUser;
+        if(!user){ alert("You are signed out."); return; }
+
+        const eventDateStr = $("#eventDate").value;
+        const data = {
+          ownerId: user.uid,
+          createdAt: serverTimestamp(),
+          eventDate: Timestamp.fromDate(new Date(eventDateStr)),
+          eventType: $("#eventType").value,
+          channel: $("#channel").value,
+          counterpartName: $("#counterpartName").value.trim(),
+          summary: $("#summary").value.trim(),
+          details: $("#details").value.trim(),
+          outcome: $("#outcome").value.trim() || null,
+          location: $("#location").value.trim() || null,
+        };
+
+        if(!data.eventDate || !data.eventType || !data.channel || !data.counterpartName || !data.summary){
+          alert("Please fill all required fields."); return;
+        }
+
+        try {
+          await addDoc(collection(db, "entries"), data);
+          e.target.reset();
+        } catch (err) {
+          console.error(err); alert("Failed to save entry.");
+        }
+      });
+
+      // Realtime table
+      if(unsub) unsub();
+      const q = query(
+        collection(db, "entries"),
+        where("ownerId", "==", auth.currentUser.uid),
+        orderBy("eventDate", "desc")
+      );
+      unsub = onSnapshot(q, (snap) => {
+        const tbody = $("#entries-tbody");
+        tbody.innerHTML = "";
+        const arr = [];
+        snap.forEach(s => {
+          const d = s.data();
+          const createdAt = d.createdAt?.toDate?.() ?? new Date(0);
+          const eventDate = d.eventDate?.toDate?.() ?? new Date(0);
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td><span class="small">${eventDate.toLocaleString()}</span></td>
+            <td>${escapeHtml(d.eventType)}</td>
+            <td>${escapeHtml(d.channel)}</td>
+            <td>${escapeHtml(d.counterpartName)}</td>
+            <td>${escapeHtml(d.summary)}</td>
+            <td>${escapeHtml(d.outcome ?? "")}</td>
+            <td><button class="btn btn--danger small" data-id="${s.id}">Delete</button></td>
+          `;
+          tbody.appendChild(tr);
+          arr.push({ id: s.id, ...d, createdAt, eventDate });
+        });
+        currentEntries = arr;
+
+        tbody.querySelectorAll("button[data-id]").forEach(btn => {
+          btn.addEventListener("click", async () => {
+            const id = btn.getAttribute("data-id");
+            if(confirm("Delete this entry? This cannot be undone.")){
+              await deleteDoc(doc(db, "entries", id));
+            }
+          });
+        });
+      });
+
+      // Export PDF
+      $("#btn-export-pdf").addEventListener("click", () => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ unit: "pt", format: "a4" });
+        const now = new Date();
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(16);
+        doc.text("Custody / Visitation Log Summary", 40, 40);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.text(`Generated: ${now.toLocaleString()}`, 40, 58);
+
+        const rows = currentEntries.map(e => [
+          e.eventDate.toLocaleString(),
+          e.eventType,
+          e.channel,
+          e.counterpartName,
+          e.summary,
+          e.outcome ?? "",
+          e.location ?? ""
+        ]);
+
+        doc.autoTable({
+          head: [["Event Date/Time","Type","Channel","Other Party","Summary","Outcome","Location"]],
+          body: rows,
+          startY: 80,
+          styles: { fontSize: 9, cellPadding: 6, overflow: "linebreak" },
+          headStyles: { fillColor: [30, 41, 82] },
+        });
+
+        doc.save(`custody-log-${now.toISOString().slice(0,10)}.pdf`);
+      });
+
+      // Logout
+      $("#btn-logout").addEventListener("click", async () => { await signOut(auth); });
+    }
+
+    onAuthStateChanged(auth, (user) => {
+      if(user) mountApp();
+      else     renderAuth();
+    });
+  </script>
+</head>
+<body></body>
+</html>
